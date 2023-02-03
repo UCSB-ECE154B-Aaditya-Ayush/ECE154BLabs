@@ -22,7 +22,7 @@ module bht #(
     input  logic                        flush_i,
     input  logic                        debug_mode_i,
     input  logic [riscv::VLEN-1:0]      vpc_i,
-    input  ariane_pkg::bht_update_t     bht_update_i,
+    input  ariane_pkg::bht_update_t     bht_up0-date_i,
     // we potentially need INSTR_PER_FETCH predictions/cycle
     output ariane_pkg::bht_prediction_t [ariane_pkg::INSTR_PER_FETCH-1:0] bht_prediction_o
 );
@@ -47,6 +47,11 @@ module bht #(
     logic [ROW_INDEX_BITS-1:0]    update_row_index;
     logic [1:0]                  saturation_counter;
 
+    logic [1:0] pht [0:2**10];
+    logic [10:0] global_branch_history = 0;
+
+    logic [9:0] index_state = global_branch_history[9:0] ^ vpc_i[11:2];
+
     assign index     = vpc_i[PREDICTION_BITS - 1:ROW_ADDR_BITS + OFFSET];
     assign update_pc = bht_update_i.pc[PREDICTION_BITS - 1:ROW_ADDR_BITS + OFFSET];
     if (ariane_pkg::RVC) begin : gen_update_row_index
@@ -57,8 +62,8 @@ module bht #(
 
     // prediction assignment
     for (genvar i = 0; i < ariane_pkg::INSTR_PER_FETCH; i++) begin : gen_bht_output
-        assign bht_prediction_o[i].valid = bht_q[index][i].valid;
-        assign bht_prediction_o[i].taken = bht_q[index][i].saturation_counter[1] == 1'b1;
+        assign bht_prediction_o[i].valid = pht[index_state].valid;
+        assign bht_prediction_o[i].taken = pht[index_state].saturation_counter[1] == 1'b1;
     end
 
     always_comb begin : update_bht
@@ -67,7 +72,7 @@ module bht #(
 
         if (bht_update_i.valid && !debug_mode_i) begin
             bht_d[update_pc][update_row_index].valid = 1'b1;
-
+            global_branch_history <= {global_branch_history[9: 0], bht_update_i.taken};
             if (saturation_counter == 2'b11) begin
                 // we can safely decrease it
                 if (!bht_update_i.taken)
